@@ -1,0 +1,19 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_DESPACHOS_URL: ${VITE_API_DESPACHOS_URL:-http://localhost:8081}
+        VITE_API_VENTAS_URL: ${VITE_API_VENTAS_URL:-http://localhost:8080}
+    image: ep2-frontend-despacho:latest
+    container_name: innovatech-frontend
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    networks:
+      - innovatech-network
+
+networks:
+  innovatech-network:
+    driver: bridge
