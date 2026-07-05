@@ -9,11 +9,13 @@ env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
   ECR_REPOSITORY: ep2-frontend-despacho
+  ECS_CLUSTER: innovatech-cluster
+  ECS_SERVICE: innovatech-frontend-service
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   build-and-deploy:
-    name: Build, Push y Deploy Frontend
+    name: Build, Push y Deploy Frontend a ECS
     runs-on: ubuntu-latest
 
     steps:
@@ -35,39 +37,31 @@ jobs:
       - name: Build y Push imagen a ECR
         run: |
           docker build \
-            --build-arg VITE_API_DESPACHOS_URL=http://${{ secrets.EC2_HOST_BACKEND }}:8081 \
-            --build-arg VITE_API_VENTAS_URL=http://${{ secrets.EC2_HOST_BACKEND }}:8080 \
+            --build-arg VITE_API_DESPACHOS_URL=http://${{ secrets.ALB_BACKEND_HOST }}:8081 \
+            --build-arg VITE_API_VENTAS_URL=http://${{ secrets.ALB_BACKEND_HOST }}:8080 \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
             .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-      - name: Deploy en EC2 Frontend
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST_FRONTEND }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-            aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-            aws configure set aws_session_token ${{ secrets.AWS_SESSION_TOKEN }}
-            aws configure set default.region ${{ env.AWS_REGION }}
+      - name: Forzar nuevo despliegue en ECS
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment
 
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-              docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+      - name: Esperar a que el servicio se estabilice
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
 
-            docker pull ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
-
-            docker stop innovatech-frontend || true
-            docker rm innovatech-frontend || true
-
-            docker run -d \
-              --name innovatech-frontend \
-              --restart unless-stopped \
-              -p 80:80 \
-              ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
-
-            echo "✅ Frontend desplegado correctamente"
-            docker ps | grep innovatech-frontend
+      - name: Confirmar estado final
+        run: |
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query "services[0].{Status:status,Running:runningCount,Desired:desiredCount}" \
+            --output table

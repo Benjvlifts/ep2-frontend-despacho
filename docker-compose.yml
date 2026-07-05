@@ -9,7 +9,7 @@ services:
     image: ep2-frontend-despacho:latest
     container_name: innovatech-frontend
     ports:
-      - "80:80"
+      - "80:8080"
     restart: unless-stopped
     networks:
       - innovatech-network

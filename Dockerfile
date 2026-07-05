@@ -5,22 +5,15 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copiar dependencias primero (optimización de caché)
 COPY package*.json ./
-
-# Instalar dependencias
 RUN npm install
-
-# Copiar código fuente
 COPY . .
 
-# Variables de entorno para build (URLs del backend)
 ARG VITE_API_DESPACHOS_URL=http://localhost:8081
 ARG VITE_API_VENTAS_URL=http://localhost:8080
 ENV VITE_API_DESPACHOS_URL=$VITE_API_DESPACHOS_URL
 ENV VITE_API_VENTAS_URL=$VITE_API_VENTAS_URL
 
-# Construir para producción
 RUN npm run build
 
 # ============================================
@@ -28,23 +21,27 @@ RUN npm run build
 # ============================================
 FROM nginx:1.25-alpine
 
-# Configuración personalizada de nginx
+# Configuración principal de nginx (pid file y directorios temporales
+# reubicados bajo /tmp/nginx, propiedad de appuser, en vez de /var/run
+# y /var/cache/nginx que son rutas de sistema de la imagen base)
+COPY nginx-main.conf /etc/nginx/nginx.conf
+
+# Configuración del server block de la aplicación
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copiar archivos compilados del stage anterior
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Crear usuario no root (principio de mínimo privilegio)
 RUN addgroup -g 1001 appgroup && \
     adduser -u 1001 -G appgroup -s /bin/sh -D appuser && \
+    mkdir -p /tmp/nginx && \
     chown -R appuser:appgroup /usr/share/nginx/html && \
     chown -R appuser:appgroup /var/cache/nginx && \
     chown -R appuser:appgroup /var/log/nginx && \
-    touch /var/run/nginx.pid && \
-    chown appuser:appgroup /var/run/nginx.pid
+    chown -R appuser:appgroup /tmp/nginx && \
+    chown appuser:appgroup /etc/nginx/conf.d/default.conf
 
 USER appuser
 
-EXPOSE 80
+EXPOSE 8080
 
 CMD ["nginx", "-g", "daemon off;"]
